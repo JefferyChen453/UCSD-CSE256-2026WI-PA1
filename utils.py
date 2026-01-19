@@ -46,7 +46,7 @@ class Indexer(object):
         :return: Returns -1 if the object isn't present, index otherwise
         """
         if (object not in self.objs_to_ints):
-            return -1
+            return 1
         else:
             return self.objs_to_ints[object]
 

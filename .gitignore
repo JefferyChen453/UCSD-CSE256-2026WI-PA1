@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+wandb
+data
+uv.lock
+*.png

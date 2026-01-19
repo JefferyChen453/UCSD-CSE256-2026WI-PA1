@@ -1,11 +1,12 @@
 # models.py
 
+from sklearn.feature_extraction.text import CountVectorizer
 import torch
 from torch import nn
 import torch.nn.functional as F
-from sklearn.feature_extraction.text import CountVectorizer
-from sentiment_data import read_sentiment_examples
 from torch.utils.data import Dataset
+
+from sentiment_data import read_sentiment_examples
 
 
 # Dataset class for handling sentiment analysis data

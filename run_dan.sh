@@ -1,0 +1,16 @@
+python main.py \
+    --model DAN \
+    --epochs 100 \
+    --lr 0.0001 \
+    --batch_size 16 \
+    --weight_decay 0.001 \
+    --wandb \
+    --wandb_project CSE256_PA1_DAN_relu \
+    --emb_dim 300 \
+    --load_pretrained_embedding True \
+    --freeze_embedding False \
+    --train_unk_token True \
+    --num_hidden_layers 1 \
+    --hidden_dim 500 \
+    --dropout True \
+    --dropout_rate 0.2 \
