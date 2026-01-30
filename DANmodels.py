@@ -54,18 +54,25 @@ class DAN(nn.Module):
         emb_dim: int,
         num_hidden_layers: int,
         hidden_dim: int,
-        dropout: bool = True,
+        training: bool,
+        dropout_word: bool = True,
+        dropout_hidden: bool = True,
         dropout_rate: float = 0.2,
         load_pretrained_embedding: bool = True,
         freeze_embedding: bool = True,
         train_unk_token: bool = True
     ):
         super().__init__()
+        assert num_hidden_layers > 0, "Number of hidden layers must be greater than 0"
+        self.training = training
         self.num_hidden_layers = num_hidden_layers
         self.train_unk_token = train_unk_token
-        self.dropout = dropout
-        if self.dropout:
-            self.dropout_layer = nn.Dropout(dropout_rate)
+        self.dropout_word = dropout_word
+        self.dropout_hidden = dropout_hidden
+        self.dropout_rate = dropout_rate
+
+        if self.dropout_hidden:
+            self.dropout_layer = nn.Dropout(self.dropout_rate)
 
         word_emb = read_word_embeddings(f"data/glove.6B.{emb_dim}d-relativized.txt")
         self.word_indexer = word_emb.word_indexer
@@ -79,12 +86,11 @@ class DAN(nn.Module):
             )
         
         self.input_layer = nn.Linear(emb_dim, hidden_dim)
-        if num_hidden_layers:
-            self.ffn_layers = nn.ModuleList(
-                [
-                    nn.Linear(hidden_dim, hidden_dim) for _ in range(num_hidden_layers)
-                ]
-            )
+        self.ffn_layers = nn.ModuleList(
+            [
+                nn.Linear(hidden_dim, hidden_dim) for _ in range(num_hidden_layers - 1)
+            ]
+        )
         self.output_layer = nn.Linear(hidden_dim, 2)
         self.log_softmax = nn.LogSoftmax(dim=1)
             
@@ -98,21 +104,23 @@ class DAN(nn.Module):
             unk_mask = (input_ids != 1).to(torch.long)
             mask = unk_mask * pad_mask
 
+        if self.training and self.dropout_word:
+            word_drop_mask = torch.bernoulli(torch.full(mask.shape, 1 - self.dropout_rate))
+            mask = mask * word_drop_mask
+
         x = x * mask.unsqueeze(-1)
         x = reduce(x, "bs seqlen emb_dim -> bs emb_dim", "sum") 
         mask_sum = mask.sum(dim=-1, keepdim=True)
         mask_sum = torch.clamp(mask_sum, min=1e-8)
         x /= mask_sum
 
-
         x = F.relu(self.input_layer(x))
-        if self.dropout:
+        if self.dropout_hidden:
             x = self.dropout_layer(x)
-        if self.num_hidden_layers:
-            for layer in self.ffn_layers:
-                x = F.relu(layer(x))
-                if self.dropout:
-                    x = self.dropout_layer(x)
+        for layer in self.ffn_layers:
+            x = F.relu(layer(x))
+            if self.dropout_hidden:
+                x = self.dropout_layer(x)
         x = self.output_layer(x)
         x = self.log_softmax(x)
 

@@ -52,6 +52,8 @@ def eval_epoch(model_name, data_loader, model, loss_fn):
     size = len(data_loader.dataset)
     num_batches = len(data_loader)
     model.eval()
+    if hasattr(model, "training"):
+        model.training = False
     eval_loss = 0
     correct = 0
     for batch in data_loader:
@@ -70,6 +72,8 @@ def eval_epoch(model_name, data_loader, model, loss_fn):
 
     average_eval_loss = eval_loss / num_batches
     accuracy = correct / size
+    if hasattr(model, "training"):
+        model.training = True
     return accuracy, average_eval_loss
 
 
@@ -135,16 +139,18 @@ def main():
     train_group.add_argument("--use_cosine_scheduler", action='store_true', help="Use cosine annealing learning rate scheduler")
     train_group.add_argument("--wandb", action='store_true', help="Log by WandB")
     train_group.add_argument("--wandb_project", type=str, default="CSE256_PA1", help="WandB project name")
+    train_group.add_argument("--run_name", type=str, default=None, help="Run name")
     
     dan_group = parser.add_argument_group("DAN")
     dan_group.add_argument("--emb_dim", type=int, default=300, help="Embedding dimension")
+    dan_group.add_argument("--num_hidden_layers", type=int, default=2, help="Number of hidden layers")
+    dan_group.add_argument("--hidden_dim", type=int, default=100, help="Hidden dimension")
+    dan_group.add_argument("--dropout_word", type=bool, default=True, help="Use dropout after word embedding")
+    dan_group.add_argument("--dropout_hidden", type=bool, default=True, help="Use dropout after hidden layers")
+    dan_group.add_argument("--dropout_rate", type=float, default=0.2, help="Dropout rate")
     dan_group.add_argument("--load_pretrained_embedding", type=bool, default=True, help="True to load pretrained 50d/300d embedding; False to init random embedding")
     dan_group.add_argument("--freeze_embedding", type=bool, default=True, help="True to freeze embedding; False to train embedding")
     dan_group.add_argument("--train_unk_token", type=bool, default=False, help="True to train unk token; False to freeze unk token")
-    dan_group.add_argument("--num_hidden_layers", type=int, default=2, help="Number of hidden layers")
-    dan_group.add_argument("--hidden_dim", type=int, default=100, help="Hidden dimension")
-    dan_group.add_argument("--dropout", type=bool, default=False, help="Use dropout after hidden layers")
-    dan_group.add_argument("--dropout_rate", type=float, default=0.2, help="Dropout rate")
 
 
     bow_group = parser.add_argument_group("BOW")
@@ -313,18 +319,25 @@ def main():
                 f"layers{args.num_hidden_layers}",
                 f"hidden{args.hidden_dim}",
             ]
-            if args.dropout:
-                run_name_parts.append(f"dropout{args.dropout_rate}")
-            if args.use_cosine_scheduler:
-                run_name_parts.append("cosine")
-            if args.weight_decay > 0:
-                run_name_parts.append(f"wd{args.weight_decay}")
-            if not args.freeze_embedding:
-                run_name_parts.append("unfrozen-emb")
-            if args.train_unk_token:
-                run_name_parts.append("train-unk")
-            
-            run_name = "_".join(run_name_parts)
+            if args.run_name:
+                run_name = args.run_name
+            else:
+                if args.dropout_word:
+                    run_name_parts.append("dropout-word")
+                if args.dropout_hidden:
+                    run_name_parts.append("dropout-hidden")
+                if args.dropout_rate > 0:
+                    run_name_parts.append(f"dropout{args.dropout_rate}")
+                if args.use_cosine_scheduler:
+                    run_name_parts.append("cosine")
+                if args.weight_decay > 0:
+                    run_name_parts.append(f"wd{args.weight_decay}")
+                if not args.freeze_embedding:
+                    run_name_parts.append("unfrozen-emb")
+                if args.train_unk_token:
+                    run_name_parts.append("train-unk")
+                
+                run_name = "_".join(run_name_parts)
             
             wandb.init(
                 project=args.wandb_project,
@@ -333,15 +346,16 @@ def main():
                     "epochs": args.epochs,
                     "lr": args.lr,
                     "batch_size": args.batch_size,
+                    "weight_decay": args.weight_decay,
                     "emb_dim": args.emb_dim,
+                    "num_hidden_layers": args.num_hidden_layers,
+                    "hidden_dim": args.hidden_dim,
+                    "dropout_word": args.dropout_word,
+                    "dropout_hidden": args.dropout_hidden,
+                    "dropout_rate": args.dropout_rate,
                     "load_pretrained_embedding": args.load_pretrained_embedding,
                     "freeze_embedding": args.freeze_embedding,
                     "train_unk_token": args.train_unk_token,
-                    "num_hidden_layers": args.num_hidden_layers,
-                    "hidden_dim": args.hidden_dim,
-                    "dropout": args.dropout,
-                    "dropout_rate": args.dropout_rate,
-                    "weight_decay": args.weight_decay,
                     "use_cosine_scheduler": args.use_cosine_scheduler,
                 },
                 name=run_name,
@@ -356,7 +370,9 @@ def main():
                 emb_dim=args.emb_dim,
                 num_hidden_layers=args.num_hidden_layers,
                 hidden_dim=args.hidden_dim,
-                dropout=args.dropout,
+                training=True,
+                dropout_word=args.dropout_word,
+                dropout_hidden=args.dropout_hidden,
                 dropout_rate=args.dropout_rate,
                 load_pretrained_embedding=args.load_pretrained_embedding,
                 freeze_embedding=args.freeze_embedding,
