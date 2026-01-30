@@ -1,4 +1,6 @@
 import argparse
+from functools import partial
+import os
 import time
 from typing import Any
 
@@ -10,6 +12,8 @@ from torch.utils.data import DataLoader
 
 from BOWmodels import NN2BOW, NN3BOW, SentimentDatasetBOW
 from DANmodels import DAN, SentimentDatasetDAN, collate_fn
+from SubwordDANmodels import SentimentDatasetSubwordDAN, SubwordDAN
+from tokenizer import Tokenizer
 
 try:
     import wandb
@@ -32,7 +36,7 @@ def train_epoch(model_name, data_loader, model, loss_fn, optimizer, device=DEVIC
         if model_name == "BOW":
             X = batch[0].float().to(device, non_blocking=True)
             y = batch[1].to(device, non_blocking=True)
-        elif model_name == "DAN":
+        elif model_name == "DAN" or model_name == "SubwordDAN":
             X = batch["input_ids"].to(device, non_blocking=True)
             y = batch["labels"].to(device, non_blocking=True)
 
@@ -69,7 +73,7 @@ def eval_epoch(model_name, data_loader, model, loss_fn, device=DEVICE):
             if model_name == "BOW":
                 X = batch[0].float().to(device, non_blocking=True)
                 y = batch[1].to(device, non_blocking=True)
-            elif model_name == "DAN":
+            elif model_name == "DAN" or model_name == "SubwordDAN":
                 X = batch["input_ids"].to(device, non_blocking=True)
                 y = batch["labels"].to(device, non_blocking=True)
 
@@ -170,6 +174,8 @@ def main():
     dan_group.add_argument("--freeze_embedding", type=bool, default=True, help="True to freeze embedding; False to train embedding")
     dan_group.add_argument("--train_unk_token", type=bool, default=False, help="True to train unk token; False to freeze unk token")
 
+    subword_group = parser.add_argument_group("SubwordDAN")
+    subword_group.add_argument("--tokenizer_path", type=str, default="tokenizer/bpe_sentiment/10000", help="Tokenizer path")
 
     bow_group = parser.add_argument_group("BOW")
     bow_group.add_argument("--bow_hidden_size", type=int, default=100, help="Hidden dimension")
@@ -447,6 +453,91 @@ def main():
         testing_accuracy_file = 'dan_dev_accuracy.png'
         plt.savefig(testing_accuracy_file)
         print(f"DAN dev accuracy plot saved as {testing_accuracy_file}\n\n")
+
+        # plt.show()
+    elif args.model == "SUBWORDDAN":
+        # Load dataset
+        start_time = time.time()
+
+        tokenizer = Tokenizer.from_files(os.path.join(args.tokenizer_path, "vocab.json"), os.path.join(args.tokenizer_path, "merges.txt"))
+        train_data = SentimentDatasetSubwordDAN("data/train.txt", tokenizer=tokenizer)
+        dev_data = SentimentDatasetSubwordDAN("data/dev.txt", tokenizer=tokenizer)
+        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=partial(collate_fn, pad_token_id=1), pin_memory=(DEVICE.type == "cuda"))
+        test_loader = DataLoader(dev_data, batch_size=args.batch_size, shuffle=False, collate_fn=partial(collate_fn, pad_token_id=1), pin_memory=(DEVICE.type == "cuda"))
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Data loaded in : {elapsed_time} seconds")
+
+        # Initialize wandb for SubwordDAN if enabled
+        if args.wandb and WANDB_AVAILABLE:
+            wandb.init(
+                project=args.wandb_project,
+                config={
+                    "model": "SubwordDAN",
+                    "epochs": args.epochs,
+                    "lr": args.lr,
+                    "optimizer": args.optimizer,
+                    "activation": args.activation,
+                    "batch_size": args.batch_size,
+                    "weight_decay": args.weight_decay,
+                    "use_cosine_scheduler": args.use_cosine_scheduler,
+                    "emb_dim": args.emb_dim,
+                    "num_hidden_layers": args.num_hidden_layers,
+                    "hidden_dim": args.hidden_dim,
+                    "dropout_word": args.dropout_word,
+                    "dropout_hidden": args.dropout_hidden,
+                    "dropout_rate": args.dropout_rate,
+                    "vocab_size": len(tokenizer.vocab),
+                },
+                name=args.run_name,
+                reinit=True,
+            )
+        
+        # Train and evaluate SubwordDAN
+        start_time = time.time()
+        print('\nSubwordDAN:')
+        subword_train_accuracy, subword_test_accuracy = experiment(
+            "SubwordDAN",
+            SubwordDAN(
+                tokenizer=tokenizer,
+                emb_dim=args.emb_dim,
+                num_hidden_layers=args.num_hidden_layers,
+                hidden_dim=args.hidden_dim,
+                training=True,
+                dropout_word=args.dropout_word,
+                dropout_hidden=args.dropout_hidden,
+                dropout_rate=args.dropout_rate,
+                activation=args.activation,
+            ),
+            train_loader,
+            test_loader,
+            epochs=args.epochs,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            optimizer_type=args.optimizer,
+            use_cosine_scheduler=args.use_cosine_scheduler,
+            use_wandb=args.wandb,
+            run_name="SubwordDAN"
+        )
+
+        # Finish SubwordDAN wandb run
+        if args.wandb and WANDB_AVAILABLE:
+            wandb.finish()
+
+        # Plot the testing accuracy
+        plt.figure(figsize=(8, 6))
+        plt.plot(subword_test_accuracy, label='SubwordDAN')
+        plt.xlabel('Epochs')
+        plt.ylabel('Dev Accuracy')
+        plt.title('Dev Accuracy for SubwordDAN')
+        plt.legend()
+        plt.grid()
+
+        # Save the testing accuracy figure
+        testing_accuracy_file = 'subword_dan_dev_accuracy.png'
+        plt.savefig(testing_accuracy_file)
+        print(f"SubwordDAN dev accuracy plot saved as {testing_accuracy_file}\n\n")
 
         # plt.show()
 
