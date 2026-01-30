@@ -39,16 +39,21 @@ class SentimentDatasetBOW(Dataset):
         return self.embeddings[idx], self.labels[idx]
 
 
+# Activation function mapping
+ACTIVATIONS = {"relu": F.relu, "silu": F.silu, "tanh": torch.tanh}
+
+
 # Two-layer fully connected neural network
 class NN2BOW(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, activation="relu"):
         super().__init__()
+        self.activation = ACTIVATIONS.get(activation, F.relu)
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, 2)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
+        x = self.activation(self.fc1(x))
         x = self.fc2(x)
         x = self.log_softmax(x)
         return x
@@ -56,16 +61,17 @@ class NN2BOW(nn.Module):
     
 # Three-layer fully connected neural network
 class NN3BOW(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, activation="relu"):
         super().__init__()
+        self.activation = ACTIVATIONS.get(activation, F.relu)
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, 2)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = self.activation(self.fc1(x))
+        x = self.activation(self.fc2(x))
         x = self.fc3(x)
         return self.log_softmax(x)
 

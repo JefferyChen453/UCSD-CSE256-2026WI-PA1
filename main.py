@@ -17,70 +17,85 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
+# Auto-detect device: use CUDA if available
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Training function
-def train_epoch(model_name, data_loader, model, loss_fn, optimizer):
+def train_epoch(model_name, data_loader, model, loss_fn, optimizer, device=DEVICE):
     size = len(data_loader.dataset)
     num_batches = len(data_loader)
     model.train()
-    train_loss, correct = 0, 0
+    train_loss = torch.tensor(0.0, device=device)
+    correct = torch.tensor(0.0, device=device)
+    grad_norm_sum = 0.0
     for batch in data_loader:
         if model_name == "BOW":
-            X = batch[0].float()
-            y = batch[1]
+            X = batch[0].float().to(device, non_blocking=True)
+            y = batch[1].to(device, non_blocking=True)
         elif model_name == "DAN":
-            X = batch["input_ids"]
-            y = batch["labels"]
+            X = batch["input_ids"].to(device, non_blocking=True)
+            y = batch["labels"].to(device, non_blocking=True)
 
         # Compute prediction error
         pred = model(X)
         loss = loss_fn(pred, y)
-        train_loss += loss.item()
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        train_loss += loss.detach()
+        correct += (pred.argmax(1) == y).type(torch.float).sum().detach()
 
         # Backpropagation
         optimizer.zero_grad()
         loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float("inf"))
+        grad_norm_sum += grad_norm.item()
         optimizer.step()
 
-    average_train_loss = train_loss / num_batches
-    accuracy = correct / size
-    return accuracy, average_train_loss
+    average_train_loss = (train_loss / num_batches).item()
+    accuracy = (correct / size).item()
+    average_grad_norm = grad_norm_sum / num_batches
+    return accuracy, average_train_loss, average_grad_norm
 
 
 # Evaluation function
-def eval_epoch(model_name, data_loader, model, loss_fn):
+def eval_epoch(model_name, data_loader, model, loss_fn, device=DEVICE):
     size = len(data_loader.dataset)
     num_batches = len(data_loader)
     model.eval()
     if hasattr(model, "training"):
         model.training = False
-    eval_loss = 0
-    correct = 0
-    for batch in data_loader:
-        if model_name == "BOW":
-            X = batch[0].float()
-            y = batch[1]
-        elif model_name == "DAN":
-            X = batch["input_ids"]
-            y = batch["labels"]
+    eval_loss = torch.tensor(0.0, device=device)
+    correct = torch.tensor(0.0, device=device)
+    with torch.no_grad():
+        for batch in data_loader:
+            if model_name == "BOW":
+                X = batch[0].float().to(device, non_blocking=True)
+                y = batch[1].to(device, non_blocking=True)
+            elif model_name == "DAN":
+                X = batch["input_ids"].to(device, non_blocking=True)
+                y = batch["labels"].to(device, non_blocking=True)
 
-        # Compute prediction error
-        pred = model(X)
-        loss = loss_fn(pred, y)
-        eval_loss += loss.item()
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            # Compute prediction error
+            pred = model(X)
+            loss = loss_fn(pred, y)
+            eval_loss += loss.detach()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().detach()
 
-    average_eval_loss = eval_loss / num_batches
-    accuracy = correct / size
+    average_eval_loss = (eval_loss / num_batches).item()
+    accuracy = (correct / size).item()
     if hasattr(model, "training"):
         model.training = True
     return accuracy, average_eval_loss
 
 
 # Experiment function to run training and evaluation for multiple epochs
-def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4, weight_decay=0.0, use_cosine_scheduler=False, use_wandb=False, run_name=None):
+def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4, weight_decay=0.0, optimizer_type="adam", use_cosine_scheduler=False, use_wandb=False, run_name=None, device=DEVICE):
+    model = model.to(device)
     loss_fn = nn.NLLLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    if optimizer_type == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif optimizer_type == "adagrad":
+        optimizer = torch.optim.Adagrad(model.parameters(), lr=lr, weight_decay=weight_decay)
+    else:  # adam
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     
     # Create cosine scheduler if enabled
     scheduler = None
@@ -93,11 +108,11 @@ def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4
     all_test_loss = []
     
     for epoch in range(epochs):
-        train_accuracy, train_loss = train_epoch(model_name, train_loader, model, loss_fn, optimizer)
+        train_accuracy, train_loss, grad_norm = train_epoch(model_name, train_loader, model, loss_fn, optimizer, device)
         all_train_accuracy.append(train_accuracy)
         all_train_loss.append(train_loss)
 
-        test_accuracy, test_loss = eval_epoch(model_name, test_loader, model, loss_fn)
+        test_accuracy, test_loss = eval_epoch(model_name, test_loader, model, loss_fn, device)
         all_test_accuracy.append(test_accuracy)
         all_test_loss.append(test_loss)
 
@@ -114,6 +129,7 @@ def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4
                 "epoch": epoch + 1,
                 "train/accuracy": train_accuracy,
                 "train/loss": train_loss,
+                "train/grad_norm": grad_norm,
                 "dev/accuracy": test_accuracy,
                 "dev/loss": test_loss,
                 "learning_rate": current_lr,
@@ -134,6 +150,8 @@ def main():
     train_group = parser.add_argument_group("Training")
     train_group.add_argument("--epochs", type=int, default=100, help="Number of epochs")
     train_group.add_argument("--lr", type=float, default=0.0001, help="Learning rate")
+    train_group.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adagrad", "adam"], help="Optimizer: sgd, adagrad, or adam (default: adam)")
+    train_group.add_argument("--activation", type=str, default="relu", choices=["relu", "silu", "tanh"], help="Activation function: relu, silu, or tanh (default: relu)")
     train_group.add_argument("--batch_size", type=int, default=16, help="Batch size")
     train_group.add_argument("--weight_decay", type=float, default=0.0001, help="Weight decay (L2 regularization)")
     train_group.add_argument("--use_cosine_scheduler", action='store_true', help="Use cosine annealing learning rate scheduler")
@@ -160,6 +178,8 @@ def main():
     # Parse the command-line arguments
     args = parser.parse_args()
 
+    print(f"Using device: {DEVICE}")
+
     # Check wandb availability if enabled
     if args.wandb:
         if not WANDB_AVAILABLE:
@@ -173,8 +193,14 @@ def main():
 
         train_data = SentimentDatasetBOW("data/train.txt")
         dev_data = SentimentDatasetBOW("data/dev.txt", vectorizer=train_data.vectorizer, train=False)
-        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-        test_loader = DataLoader(dev_data, batch_size=args.batch_size, shuffle=False)
+        train_loader = DataLoader(
+            train_data, batch_size=args.batch_size, shuffle=True,
+            pin_memory=(DEVICE.type == "cuda"),
+        )
+        test_loader = DataLoader(
+            dev_data, batch_size=args.batch_size, shuffle=False,
+            pin_memory=(DEVICE.type == "cuda"),
+        )
 
         end_time = time.time()
         elapsed_time = end_time - start_time
@@ -189,6 +215,8 @@ def main():
                     "num_layers": 2,
                     "epochs": args.epochs,
                     "lr": args.lr,
+                    "optimizer": args.optimizer,
+                    "activation": args.activation,
                     "batch_size": args.batch_size,
                     "input_size": args.input_size,
                     "bow_hidden_size": args.bow_hidden_size,
@@ -204,12 +232,13 @@ def main():
         print('\n2 layers:')
         nn2_train_accuracy, nn2_test_accuracy = experiment(
             "BOW", 
-            NN2BOW(input_size=args.input_size, bow_hidden_size=args.bow_hidden_size), 
+            NN2BOW(input_size=args.input_size, bow_hidden_size=args.bow_hidden_size, activation=args.activation), 
             train_loader, 
             test_loader,
             epochs=args.epochs,
             lr=args.lr,
             weight_decay=args.weight_decay,
+            optimizer_type=args.optimizer,
             use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="NN2BOW"
@@ -228,6 +257,8 @@ def main():
                     "num_layers": 3,
                     "epochs": args.epochs,
                     "lr": args.lr,
+                    "optimizer": args.optimizer,
+                    "activation": args.activation,
                     "batch_size": args.batch_size,
                     "input_size": args.input_size,
                     "bow_hidden_size": args.bow_hidden_size,
@@ -242,12 +273,13 @@ def main():
         print('\n3 layers:')
         nn3_train_accuracy, nn3_test_accuracy = experiment(
             "BOW", 
-            NN3BOW(input_size=args.input_size, bow_hidden_size=args.bow_hidden_size), 
+            NN3BOW(input_size=args.input_size, bow_hidden_size=args.bow_hidden_size, activation=args.activation), 
             train_loader, 
             test_loader,
             epochs=args.epochs,
             lr=args.lr,
             weight_decay=args.weight_decay,
+            optimizer_type=args.optimizer,
             use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="NN3BOW"
@@ -303,8 +335,14 @@ def main():
             emb_dim=args.emb_dim,
             load_pretrained_embedding=args.load_pretrained_embedding,
         )
-        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
-        test_loader = DataLoader(dev_data, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+        train_loader = DataLoader(
+            train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn,
+            pin_memory=(DEVICE.type == "cuda"),
+        )
+        test_loader = DataLoader(
+            dev_data, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn,
+            pin_memory=(DEVICE.type == "cuda"),
+        )
 
         end_time = time.time()
         elapsed_time = end_time - start_time
@@ -345,6 +383,8 @@ def main():
                     "model": "DAN",
                     "epochs": args.epochs,
                     "lr": args.lr,
+                    "optimizer": args.optimizer,
+                    "activation": args.activation,
                     "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay,
                     "emb_dim": args.emb_dim,
@@ -377,12 +417,14 @@ def main():
                 load_pretrained_embedding=args.load_pretrained_embedding,
                 freeze_embedding=args.freeze_embedding,
                 train_unk_token=args.train_unk_token,
+                activation=args.activation,
             ),
             train_loader,
             test_loader,
             epochs=args.epochs,
             lr=args.lr,
             weight_decay=args.weight_decay,
+            optimizer_type=args.optimizer,
             use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="DAN"
