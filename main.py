@@ -7,7 +7,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from BOWmodels import NN2BOW, NN3BOW, SentimentDatasetBOW
@@ -91,21 +90,16 @@ def eval_epoch(model_name, data_loader, model, loss_fn, device=DEVICE):
 
 
 # Experiment function to run training and evaluation for multiple epochs
-def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4, weight_decay=0.0, optimizer_type="adam", use_cosine_scheduler=False, use_wandb=False, run_name=None, device=DEVICE):
+def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4, weight_decay=0.0, optimizer_type="adam", use_wandb=False, run_name=None, device=DEVICE):
     model = model.to(device)
     loss_fn = nn.NLLLoss()
-    if optimizer_type == "sgd":
+    if optimizer_type == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_type == "adagrad":
+    elif optimizer_type == "Adagrad":
         optimizer = torch.optim.Adagrad(model.parameters(), lr=lr, weight_decay=weight_decay)
-    else:  # adam
+    else:  # Adam
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     
-    # Create cosine scheduler if enabled
-    scheduler = None
-    if use_cosine_scheduler:
-        scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=0.1*lr)
-
     all_train_accuracy = []
     all_test_accuracy = []
     all_train_loss = []
@@ -120,12 +114,7 @@ def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4
         all_test_accuracy.append(test_accuracy)
         all_test_loss.append(test_loss)
 
-        # Step scheduler after each epoch if enabled
-        if scheduler is not None:
-            scheduler.step()
-            current_lr = scheduler.get_last_lr()[0]
-        else:
-            current_lr = lr
+        current_lr = lr
 
         # Log to wandb if enabled
         if use_wandb and WANDB_AVAILABLE:
@@ -144,9 +133,17 @@ def experiment(model_name, model, train_loader, test_loader, epochs=100, lr=1e-4
     
     return all_train_accuracy, all_test_accuracy
 
+def str2bool(v):
+    """Parse string to bool for argparse. bool('False') is True in Python!"""
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected.")
 
 def main():
-
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Run model training based on specified model type')
     parser.add_argument('--model', type=str, required=True, help='Model type to train (e.g., BOW)')
@@ -154,11 +151,10 @@ def main():
     train_group = parser.add_argument_group("Training")
     train_group.add_argument("--epochs", type=int, default=100, help="Number of epochs")
     train_group.add_argument("--lr", type=float, default=0.0001, help="Learning rate")
-    train_group.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adagrad", "adam"], help="Optimizer: sgd, adagrad, or adam (default: adam)")
-    train_group.add_argument("--activation", type=str, default="relu", choices=["relu", "silu", "tanh"], help="Activation function: relu, silu, or tanh (default: relu)")
-    train_group.add_argument("--batch_size", type=int, default=16, help="Batch size")
+    train_group.add_argument("--optimizer", type=str, default="Adam", choices=["SGD", "Adagrad", "Adam"], help="Optimizer: SGD, Adagrad, or Adam (default: Adam)")
+    train_group.add_argument("--activation", type=str, default="ReLU", choices=["ReLU", "SiLU", "Tanh"], help="Activation function: ReLU, SiLU, or Tanh (default: ReLU)")
+    train_group.add_argument("--batch_size", type=int, default=32, help="Batch size")
     train_group.add_argument("--weight_decay", type=float, default=0.0001, help="Weight decay (L2 regularization)")
-    train_group.add_argument("--use_cosine_scheduler", action='store_true', help="Use cosine annealing learning rate scheduler")
     train_group.add_argument("--wandb", action='store_true', help="Log by WandB")
     train_group.add_argument("--wandb_project", type=str, default="CSE256_PA1", help="WandB project name")
     train_group.add_argument("--run_name", type=str, default=None, help="Run name")
@@ -166,13 +162,12 @@ def main():
     dan_group = parser.add_argument_group("DAN")
     dan_group.add_argument("--emb_dim", type=int, default=300, help="Embedding dimension")
     dan_group.add_argument("--num_hidden_layers", type=int, default=2, help="Number of hidden layers")
-    dan_group.add_argument("--hidden_dim", type=int, default=100, help="Hidden dimension")
-    dan_group.add_argument("--dropout_word", type=bool, default=True, help="Use dropout after word embedding")
-    dan_group.add_argument("--dropout_hidden", type=bool, default=True, help="Use dropout after hidden layers")
-    dan_group.add_argument("--dropout_rate", type=float, default=0.2, help="Dropout rate")
-    dan_group.add_argument("--load_pretrained_embedding", type=bool, default=True, help="True to load pretrained 50d/300d embedding; False to init random embedding")
-    dan_group.add_argument("--freeze_embedding", type=bool, default=True, help="True to freeze embedding; False to train embedding")
-    dan_group.add_argument("--train_unk_token", type=bool, default=False, help="True to train unk token; False to freeze unk token")
+    dan_group.add_argument("--hidden_dim", type=int, default=300, help="Hidden dimension")
+    dan_group.add_argument("--dropout_word", type=str2bool, default=True, help="Use dropout after word embedding")
+    dan_group.add_argument("--dropout_hidden", type=str2bool, default=True, help="Use dropout after hidden layers")
+    dan_group.add_argument("--dropout_rate", type=float, default=0.3, help="Dropout rate")
+    dan_group.add_argument("--load_pretrained_embedding", type=str2bool, default=True, help="True to load pretrained 50d/300d embedding; False to init random embedding")
+    dan_group.add_argument("--freeze_embedding", type=str2bool, default=False, help="True to freeze embedding; False to train embedding")
 
     subword_group = parser.add_argument_group("SubwordDAN")
     subword_group.add_argument("--tokenizer_path", type=str, default="tokenizer/bpe_sentiment/10000", help="Tokenizer path")
@@ -183,7 +178,7 @@ def main():
 
     # Parse the command-line arguments
     args = parser.parse_args()
-
+    print(args)
     print(f"Using device: {DEVICE}")
 
     # Check wandb availability if enabled
@@ -215,6 +210,7 @@ def main():
         # Initialize wandb for NN2 if enabled
         if args.wandb and WANDB_AVAILABLE:
             wandb.init(
+                entity="chentianyi453",
                 project=args.wandb_project,
                 config={
                     "model": "BOW_NN2",
@@ -227,7 +223,6 @@ def main():
                     "input_size": args.input_size,
                     "bow_hidden_size": args.bow_hidden_size,
                     "weight_decay": args.weight_decay,
-                    "use_cosine_scheduler": args.use_cosine_scheduler,
                 },
                 name=f"BOW_NN2_{args.epochs}epochs_lr{args.lr}",
                 reinit=True,
@@ -245,7 +240,6 @@ def main():
             lr=args.lr,
             weight_decay=args.weight_decay,
             optimizer_type=args.optimizer,
-            use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="NN2BOW"
         )
@@ -257,6 +251,7 @@ def main():
         # Initialize wandb for NN3 if enabled
         if args.wandb and WANDB_AVAILABLE:
             wandb.init(
+                entity="chentianyi453",
                 project=args.wandb_project,
                 config={
                     "model": "BOW_NN3",
@@ -269,7 +264,6 @@ def main():
                     "input_size": args.input_size,
                     "bow_hidden_size": args.bow_hidden_size,
                     "weight_decay": args.weight_decay,
-                    "use_cosine_scheduler": args.use_cosine_scheduler,
                 },
                 name=f"BOW_NN3_{args.epochs}epochs_lr{args.lr}",
                 reinit=True,
@@ -286,7 +280,6 @@ def main():
             lr=args.lr,
             weight_decay=args.weight_decay,
             optimizer_type=args.optimizer,
-            use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="NN3BOW"
         )
@@ -372,18 +365,15 @@ def main():
                     run_name_parts.append("dropout-hidden")
                 if args.dropout_rate > 0:
                     run_name_parts.append(f"dropout{args.dropout_rate}")
-                if args.use_cosine_scheduler:
-                    run_name_parts.append("cosine")
                 if args.weight_decay > 0:
                     run_name_parts.append(f"wd{args.weight_decay}")
                 if not args.freeze_embedding:
                     run_name_parts.append("unfrozen-emb")
-                if args.train_unk_token:
-                    run_name_parts.append("train-unk")
                 
                 run_name = "_".join(run_name_parts)
             
             wandb.init(
+                entity="chentianyi453",
                 project=args.wandb_project,
                 config={
                     "model": "DAN",
@@ -401,13 +391,12 @@ def main():
                     "dropout_rate": args.dropout_rate,
                     "load_pretrained_embedding": args.load_pretrained_embedding,
                     "freeze_embedding": args.freeze_embedding,
-                    "train_unk_token": args.train_unk_token,
-                    "use_cosine_scheduler": args.use_cosine_scheduler,
                 },
                 name=run_name,
             )
 
         # Train and evaluate DAN
+        print(args)
         start_time = time.time()
         print('\nDAN:')
         dan_train_accuracy, dan_test_accuracy = experiment(
@@ -422,7 +411,6 @@ def main():
                 dropout_rate=args.dropout_rate,
                 load_pretrained_embedding=args.load_pretrained_embedding,
                 freeze_embedding=args.freeze_embedding,
-                train_unk_token=args.train_unk_token,
                 activation=args.activation,
             ),
             train_loader,
@@ -431,7 +419,6 @@ def main():
             lr=args.lr,
             weight_decay=args.weight_decay,
             optimizer_type=args.optimizer,
-            use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="DAN"
         )
@@ -472,6 +459,7 @@ def main():
         # Initialize wandb for SubwordDAN if enabled
         if args.wandb and WANDB_AVAILABLE:
             wandb.init(
+                entity="chentianyi453",
                 project=args.wandb_project,
                 config={
                     "model": "SubwordDAN",
@@ -481,7 +469,6 @@ def main():
                     "activation": args.activation,
                     "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay,
-                    "use_cosine_scheduler": args.use_cosine_scheduler,
                     "emb_dim": args.emb_dim,
                     "num_hidden_layers": args.num_hidden_layers,
                     "hidden_dim": args.hidden_dim,
@@ -516,7 +503,6 @@ def main():
             lr=args.lr,
             weight_decay=args.weight_decay,
             optimizer_type=args.optimizer,
-            use_cosine_scheduler=args.use_cosine_scheduler,
             use_wandb=args.wandb,
             run_name="SubwordDAN"
         )

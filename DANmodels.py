@@ -48,7 +48,7 @@ def collate_fn(batch, pad_token_id=0):
     }
 
 
-ACTIVATIONS = {"relu": F.relu, "silu": F.silu, "tanh": torch.tanh}
+ACTIVATIONS = {"ReLU": F.relu, "SiLU": F.silu, "Tanh": torch.tanh}
 
 
 class DAN(nn.Module):
@@ -63,14 +63,12 @@ class DAN(nn.Module):
         dropout_rate: float = 0.2,
         load_pretrained_embedding: bool = True,
         freeze_embedding: bool = True,
-        train_unk_token: bool = True,
-        activation: str = "relu",
+        activation: str = "ReLU",
     ):
         super().__init__()
         assert num_hidden_layers > 0, "Number of hidden layers must be greater than 0"
         self.training = training
         self.num_hidden_layers = num_hidden_layers
-        self.train_unk_token = train_unk_token
         self.dropout_word = dropout_word
         self.dropout_hidden = dropout_hidden
         self.dropout_rate = dropout_rate
@@ -87,7 +85,6 @@ class DAN(nn.Module):
             self.embeddings = nn.Embedding(
                 num_embeddings=len(self.word_indexer),
                 embedding_dim=emb_dim,
-                freeze=False
             )
         
         self.input_layer = nn.Linear(emb_dim, hidden_dim)
@@ -103,11 +100,8 @@ class DAN(nn.Module):
         x = self.embeddings(input_ids) # [bs, seq_len] -> [bs, seqlen, emb_dim]
 
         pad_mask = (input_ids != 0).to(torch.long)
-        if self.train_unk_token:
-            mask = pad_mask
-        else:
-            unk_mask = (input_ids != 1).to(torch.long)
-            mask = unk_mask * pad_mask
+        unk_mask = (input_ids != 1).to(torch.long)
+        mask = unk_mask * pad_mask
 
         if self.training and self.dropout_word:
             word_drop_mask = torch.bernoulli(
