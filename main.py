@@ -167,7 +167,7 @@ def main():
     dan_group.add_argument("--dropout_hidden", type=str2bool, default=True, help="Use dropout after hidden layers")
     dan_group.add_argument("--dropout_rate", type=float, default=0.3, help="Dropout rate")
     dan_group.add_argument("--load_pretrained_embedding", type=str2bool, default=True, help="True to load pretrained 50d/300d embedding; False to init random embedding")
-    dan_group.add_argument("--freeze_embedding", type=str2bool, default=False, help="True to freeze embedding; False to train embedding")
+    dan_group.add_argument("--freeze_embedding", type=str2bool, default=True, help="True to freeze embedding; False to train embedding")
 
     subword_group = parser.add_argument_group("SubwordDAN")
     subword_group.add_argument("--tokenizer_path", type=str, default="tokenizer/bpe_sentiment/10000", help="Tokenizer path")

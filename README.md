@@ -8,6 +8,7 @@ Sentiment classification using Bag-of-Words (BOW), Deep Averaging Networks (DAN)
 ### Environment Setup
 ```bash
 uv sync
+source .venv/bin/activate
 ```
 ### Train Models
 ```bash
@@ -18,7 +19,7 @@ python main.py --model BOW
 python main.py --model DAN
 
 # Train SubwordDAN with BPE tokenizer
-python main.py --model SUBWORDDAN --epochs 200
+python main.py --model SUBWORDDAN --epochs 120 # For the best results, train for 120 epochs
 ```
 ### Train BPE Tokenizer
 ```bash
@@ -84,7 +85,7 @@ python tokenizer/bpe.py
 | dropout_hidden | True |
 | dropout_rate | 0.3 |
 | load_pretrained_embedding | True |
-| freeze_embedding | False |
+| freeze_embedding | True |
 | **Dev Accuracy** | **0.807** |
 
 ### SubwordDAN (Best: Dev Acc 78.2%)
