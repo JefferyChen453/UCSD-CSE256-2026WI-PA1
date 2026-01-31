@@ -5,6 +5,10 @@ Sentiment classification using Bag-of-Words (BOW), Deep Averaging Networks (DAN)
 **All experiment logs available on [Weights & Biases](https://wandb.ai/chentianyi453/CSE256_PA1).**
 
 ## Quick Start
+### Environment Setup
+```bash
+uv sync
+```
 ### Train Models
 ```bash
 # Train BOW model (NN2 & NN3)
